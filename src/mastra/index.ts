@@ -9,8 +9,9 @@ import { z } from "zod";
 
 import { sharedPostgresStorage } from "./storage";
 import { inngest, inngestServe } from "./inngest";
-import { exampleWorkflow } from "./workflows/exampleWorkflow"; // Replace with your own workflow
-import { exampleAgent } from "./agents/exampleAgent"; // Replace with your own agent
+import { forexTradingWorkflow } from "./workflows/forexTradingWorkflow";
+import { forexTradingAgent } from "./agents/forexTradingAgent";
+import { registerTelegramTrigger } from "../triggers/telegramTriggers";
 
 class ProductionPinoLogger extends MastraLogger {
   protected logger: pino.Logger;
@@ -56,9 +57,9 @@ class ProductionPinoLogger extends MastraLogger {
 export const mastra = new Mastra({
   storage: sharedPostgresStorage,
   // Register your workflows here
-  workflows: {},
+  workflows: { forexTradingWorkflow },
   // Register your agents here
-  agents: {},
+  agents: { forexTradingAgent },
   mcpServers: {
     allTools: new MCPServer({
       name: "allTools",
@@ -204,10 +205,32 @@ export const mastra = new Mastra({
       //
       // ======================================================================
 
-      // Add more connector triggers below using the same pattern
-      // ...registerGithubTrigger({ ... }),
-      // ...registerSlackTrigger({ ... }),
-      // ...registerStripeWebhook({ ... }),
+      // ======================================================================
+      // Telegram Trading Signal Webhook
+      // ======================================================================
+      ...registerTelegramTrigger({
+        triggerType: "telegram/message",
+        handler: async (mastra, triggerInfo) => {
+          const logger = mastra.getLogger();
+          logger?.info("🎯 [Telegram Trigger] Processing trading signal", {
+            userName: triggerInfo.params.userName,
+            messagePreview: triggerInfo.params.message.substring(0, 100),
+          });
+
+          // Create a unique thread ID for this user
+          const threadId = `telegram-${triggerInfo.params.userName}`;
+
+          // Start the forex trading workflow
+          const run = await forexTradingWorkflow.createRunAsync();
+          return await run.start({
+            inputData: {
+              threadId,
+              userName: triggerInfo.params.userName,
+              message: triggerInfo.params.message,
+            },
+          });
+        }
+      }),
     ],
   },
   logger:
